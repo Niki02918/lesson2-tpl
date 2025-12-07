@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 
@@ -395,47 +396,45 @@ func validateResources(node *yaml.Node) []ValidationError {
 
 	// limits: optional
 	if limitsNode, ok := getMapValue(node, "limits"); ok {
-		errs = append(errs, validateResourceMap(limitsNode, "resources.limits")...)
+		errs = append(errs, validateResourceMap(limitsNode)...)
 	}
 
 	// requests: optional
 	if reqNode, ok := getMapValue(node, "requests"); ok {
-		errs = append(errs, validateResourceMap(reqNode, "resources.requests")...)
+		errs = append(errs, validateResourceMap(reqNode)...)
 	}
 
 	return errs
 }
 
-func validateResourceMap(node *yaml.Node, prefix string) []ValidationError {
+func validateResourceMap(node *yaml.Node) []ValidationError {
 	var errs []ValidationError
 
 	if node.Kind != yaml.MappingNode {
-		errs = append(errs, newType(prefix, "object", node.Line))
+		errs = append(errs, newType("resources", "object", node.Line))
 		return errs
 	}
 
 	for i := 0; i < len(node.Content); i += 2 {
 		k := node.Content[i]
 		v := node.Content[i+1]
+
 		switch k.Value {
 		case "cpu":
-			if v.Kind != yaml.ScalarNode {
-				errs = append(errs, newType(prefix+".cpu", "int", v.Line))
-				continue
-			}
-			if _, err := strconv.Atoi(v.Value); err != nil {
-				errs = append(errs, newType(prefix+".cpu", "int", v.Line))
+			// cpu (integer) — поле должно быть именно YAML int, а не строка
+			if v.Kind != yaml.ScalarNode || v.Tag != "!!int" {
+				errs = append(errs, newType("cpu", "int", v.Line))
 			}
 		case "memory":
 			if v.Kind != yaml.ScalarNode {
-				errs = append(errs, newType(prefix+".memory", "string", v.Line))
+				errs = append(errs, newType("memory", "string", v.Line))
 				continue
 			}
 			if !memoryRe.MatchString(v.Value) {
-				errs = append(errs, newInvalidFormat(prefix+".memory", v.Value, v.Line))
+				errs = append(errs, newInvalidFormat("memory", v.Value, v.Line))
 			}
 		default:
-			// неизвестный ресурс игнорируем
+			// неизвестные ресурсы игнорируем
 		}
 	}
 
@@ -451,6 +450,7 @@ func main() {
 	}
 
 	fileName := os.Args[1]
+	baseName := filepath.Base(fileName)
 
 	content, err := os.ReadFile(fileName)
 	if err != nil {
@@ -460,12 +460,12 @@ func main() {
 
 	var root yaml.Node
 	if err := yaml.Unmarshal(content, &root); err != nil {
-		fmt.Fprintf(os.Stdout, "%s: cannot unmarshal yaml: %v\n", fileName, err)
+		fmt.Fprintf(os.Stdout, "%s: cannot unmarshal yaml: %v\n", baseName, err)
 		os.Exit(1)
 	}
 
 	if len(root.Content) == 0 {
-		fmt.Fprintf(os.Stdout, "%s: empty yaml document\n", fileName)
+		fmt.Fprintf(os.Stdout, "%s: empty yaml document\n", baseName)
 		os.Exit(1)
 	}
 
@@ -475,9 +475,9 @@ func main() {
 	if len(errs) > 0 {
 		for _, e := range errs {
 			if e.Line > 0 {
-				fmt.Fprintf(os.Stdout, "%s:%d %s\n", fileName, e.Line, e.Text)
+				fmt.Fprintf(os.Stdout, "%s:%d %s\n", baseName, e.Line, e.Text)
 			} else {
-				fmt.Fprintf(os.Stdout, "%s: %s\n", fileName, e.Text)
+				fmt.Fprintf(os.Stdout, "%s: %s\n", baseName, e.Text)
 			}
 		}
 		os.Exit(1)
