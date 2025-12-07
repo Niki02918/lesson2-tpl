@@ -127,29 +127,29 @@ func validateMetadata(node *yaml.Node) []ValidationError {
 	// name: required string
 	nameNode, ok := getMapValue(node, "name")
 	if !ok {
-		errs = append(errs, newRequired("metadata.name"))
+		errs = append(errs, newRequired("name"))
 	} else {
 		if nameNode.Kind != yaml.ScalarNode {
-			errs = append(errs, newType("metadata.name", "string", nameNode.Line))
+			errs = append(errs, newType("name", "string", nameNode.Line))
 		}
 	}
 
 	// namespace: optional string
 	if nsNode, ok := getMapValue(node, "namespace"); ok {
 		if nsNode.Kind != yaml.ScalarNode {
-			errs = append(errs, newType("metadata.namespace", "string", nsNode.Line))
+			errs = append(errs, newType("namespace", "string", nsNode.Line))
 		}
 	}
 
 	// labels: optional object<string,string>
 	if labelsNode, ok := getMapValue(node, "labels"); ok {
 		if labelsNode.Kind != yaml.MappingNode {
-			errs = append(errs, newType("metadata.labels", "object", labelsNode.Line))
+			errs = append(errs, newType("labels", "object", labelsNode.Line))
 		} else {
 			for i := 0; i < len(labelsNode.Content); i += 2 {
 				v := labelsNode.Content[i+1]
 				if v.Kind != yaml.ScalarNode {
-					errs = append(errs, newType("metadata.labels", "string", v.Line))
+					errs = append(errs, newType("labels", "string", v.Line))
 				}
 			}
 		}
@@ -185,7 +185,7 @@ func validateSpec(node *yaml.Node) []ValidationError {
 	// containers: required, list of Container
 	containersNode, ok := getMapValue(node, "containers")
 	if !ok {
-		errs = append(errs, newRequired("spec.containers"))
+		errs = append(errs, newRequired("containers"))
 	} else {
 		errs = append(errs, validateContainers(containersNode)...)
 	}
@@ -210,27 +210,34 @@ func validateContainers(node *yaml.Node) []ValidationError {
 
 	for _, item := range node.Content {
 		if item.Kind != yaml.MappingNode {
-			errs = append(errs, newType("container", "object", item.Line))
+			errs = append(errs, newType("containers", "object", item.Line))
 			continue
 		}
 
 		// name
 		nameNode, ok := getMapValue(item, "name")
 		if !ok {
-			errs = append(errs, newRequired("containers.name"))
+			errs = append(errs, newRequired("name"))
 		} else {
 			if nameNode.Kind != yaml.ScalarNode {
-				errs = append(errs, newType("containers.name", "string", nameNode.Line))
+				errs = append(errs, newType("name", "string", nameNode.Line))
 			} else {
 				name := nameNode.Value
-				if !containerNameRe.MatchString(name) {
-					errs = append(errs, newInvalidFormat("containers.name", name, nameNode.Line))
+				if name == "" {
+					// пустая строка = обязательное поле не заполнено
+					errs = append(errs, ValidationError{
+						Line: nameNode.Line,
+						Text: "name is required",
+					})
+				} else {
+					if !containerNameRe.MatchString(name) {
+						errs = append(errs, newInvalidFormat("name", name, nameNode.Line))
+					}
+					if _, exists := seenNames[name]; exists {
+						errs = append(errs, newInvalidFormat("name", name, nameNode.Line))
+					}
+					seenNames[name] = struct{}{}
 				}
-				if _, exists := seenNames[name]; exists {
-					// имя должно быть уникальным
-					errs = append(errs, newInvalidFormat("containers.name", name, nameNode.Line))
-				}
-				seenNames[name] = struct{}{}
 			}
 		}
 
@@ -333,7 +340,6 @@ func validateProbe(node *yaml.Node, probeField string) []ValidationError {
 
 	httpGetNode, ok := getMapValue(node, "httpGet")
 	if !ok {
-		// требуется httpGet
 		errs = append(errs, newRequired("httpGet"))
 		return errs
 	}
@@ -429,8 +435,7 @@ func validateResourceMap(node *yaml.Node, prefix string) []ValidationError {
 				errs = append(errs, newInvalidFormat(prefix+".memory", v.Value, v.Line))
 			}
 		default:
-			// неизвестный ресурс можно либо игнорировать, либо ругаться.
-			// Официальное API допускает расширения, поэтому просто игнорируем.
+			// неизвестный ресурс игнорируем
 		}
 	}
 
@@ -441,7 +446,7 @@ func validateResourceMap(node *yaml.Node, prefix string) []ValidationError {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: yamlvalid <path-to-yaml>")
+		fmt.Fprintln(os.Stdout, "usage: yamlvalid <path-to-yaml>")
 		os.Exit(1)
 	}
 
@@ -449,18 +454,18 @@ func main() {
 
 	content, err := os.ReadFile(fileName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot read file '%s': %v\n", fileName, err)
+		fmt.Fprintf(os.Stdout, "cannot read file '%s': %v\n", fileName, err)
 		os.Exit(1)
 	}
 
 	var root yaml.Node
 	if err := yaml.Unmarshal(content, &root); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: cannot unmarshal yaml: %v\n", fileName, err)
+		fmt.Fprintf(os.Stdout, "%s: cannot unmarshal yaml: %v\n", fileName, err)
 		os.Exit(1)
 	}
 
 	if len(root.Content) == 0 {
-		fmt.Fprintf(os.Stderr, "%s: empty yaml document\n", fileName)
+		fmt.Fprintf(os.Stdout, "%s: empty yaml document\n", fileName)
 		os.Exit(1)
 	}
 
@@ -470,14 +475,13 @@ func main() {
 	if len(errs) > 0 {
 		for _, e := range errs {
 			if e.Line > 0 {
-				fmt.Fprintf(os.Stderr, "%s:%d %s\n", fileName, e.Line, e.Text)
+				fmt.Fprintf(os.Stdout, "%s:%d %s\n", fileName, e.Line, e.Text)
 			} else {
-				fmt.Fprintf(os.Stderr, "%s: %s\n", fileName, e.Text)
+				fmt.Fprintf(os.Stdout, "%s: %s\n", fileName, e.Text)
 			}
 		}
 		os.Exit(1)
 	}
 
-	// успешная валидация
 	os.Exit(0)
 }
