@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"gopop.in/yaml.v3"
+	"gopkg.in/yaml.v3"
 )
 
 type ValidationError struct {
@@ -296,7 +296,7 @@ func validateProbe(n *yaml.Node) []ValidationError {
 		errs = append(errs, newRequired("path"))
 	} else if path.Kind != yaml.ScalarNode {
 		errs = append(errs, newType("path", "string", path.Line))
-	} else if !regexp.MustCompile(`^/`).MatchString(path.Value) {
+	} else if len(path.Value) == 0 || path.Value[0] != '/' {
 		errs = append(errs, newInvalidFormat("path", path.Value, path.Line))
 	}
 
